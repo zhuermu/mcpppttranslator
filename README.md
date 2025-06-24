@@ -32,7 +32,7 @@ A Model Context Protocol (MCP) service that provides PowerPoint translation capa
 ### Using npm
 
 ```bash
-npm install -g @zhu2mu/server-ppt-translator
+npm install -g server-ppt-translator
 ```
 
 ### Using Amazon Q Configuration
@@ -47,7 +47,7 @@ Add the following to your Amazon Q configuration:
     "command": "npx",
     "args": [
       "-y",
-      "@zhu2mu/server-ppt-translator@latest"
+      "server-ppt-translator@latest"
     ],
     "env": {
       "AWS_ACCESS_KEY_ID": "${AWS_ACCESS_KEY_ID}",
