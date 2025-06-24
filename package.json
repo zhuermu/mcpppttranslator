@@ -1,5 +1,5 @@
 {
-  "name": "@modelcontextprotocol/server-ppt-translator",
+  "name": "@zhuermu/server-ppt-translator",
   "version": "1.0.0",
   "description": "MCP server for PowerPoint translation using AWS Bedrock",
   "main": "index.js",
@@ -16,8 +16,16 @@
     "aws",
     "bedrock"
   ],
-  "author": "",
+  "author": "zhuermu",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhuermu/mcpppttranslator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zhuermu/mcpppttranslator/issues"
+  },
+  "homepage": "https://github.com/zhuermu/mcpppttranslator#readme",
   "dependencies": {
     "@modelcontextprotocol/server": "^1.0.0"
   }
