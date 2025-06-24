@@ -1,5 +1,8 @@
 {
-  "name": "ppt-translator-mcp-zhu2mu",
+  "name": "@zhuermu/ppt-translator-mcp",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "version": "1.0.0",
   "description": "MCP server for PowerPoint translation using AWS Bedrock",
   "main": "index.js",
