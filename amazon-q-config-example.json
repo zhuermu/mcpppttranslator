@@ -6,7 +6,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "server-ppt-translator@latest"
+        "ppt-translator-mcp@latest"
       ],
       "env": {
         "AWS_ACCESS_KEY_ID": "${AWS_ACCESS_KEY_ID}",

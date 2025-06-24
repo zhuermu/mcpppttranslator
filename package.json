@@ -1,5 +1,5 @@
 {
-  "name": "server-ppt-translator",
+  "name": "ppt-translator-mcp",
   "version": "1.0.0",
   "description": "MCP server for PowerPoint translation using AWS Bedrock",
   "main": "index.js",
