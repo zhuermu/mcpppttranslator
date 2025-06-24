@@ -6,8 +6,9 @@ A Model Context Protocol (MCP) service that provides PowerPoint translation capa
 
 - Translate PowerPoint presentations to multiple languages
 - Preserve formatting during translation
-- Support for multiple translation engines (Nova Lite and Claude)
+- Support for AWS Bedrock Nova models
 - Intelligent handling of proper nouns, brand names, and special content
+- Optimized MCP implementation with fallback support
 
 ## Supported Languages
 
@@ -22,17 +23,24 @@ A Model Context Protocol (MCP) service that provides PowerPoint translation capa
 
 ## Prerequisites
 
-- Node.js 14+ (for npm package installation)
 - Python 3.8+
 - AWS account with Bedrock access
 - AWS credentials configured
 
 ## Installation
 
-### Using npm
+### Using pip (Python)
 
 ```bash
-npm install -g ppt-translator-mcp
+# Clone the repository
+git clone https://github.com/yourusername/mcpppttranslator.git
+cd mcpppttranslator
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Or use the built-in helper
+python server.py --install-deps
 ```
 
 ### Using Amazon Q Configuration
@@ -44,10 +52,10 @@ Add the following to your Amazon Q configuration:
   "ppt-translator": {
     "timeout": 60,
     "type": "stdio",
-    "command": "npx",
+    "command": "python",
     "args": [
-      "-y",
-      "ppt-translator-mcp@latest"
+      "/path/to/mcpppttranslator/server.py",
+      "--mcp"
     ],
     "env": {
       "AWS_ACCESS_KEY_ID": "${AWS_ACCESS_KEY_ID}",
@@ -59,9 +67,24 @@ Add the following to your Amazon Q configuration:
 }
 ```
 
+### Direct Python Execution
+
+You can also run the server directly using Python:
+
+```bash
+# Run the server in MCP mode
+python server.py --mcp
+
+# Or translate a file directly
+python server.py --translate --input-file presentation.pptx --target-language ja
+
+# List supported languages
+python server.py --list-languages
+```
+
 ## Usage
 
-Once the MCP server is running, you can use it with any MCP-compatible client like Amazon Q or Claude Desktop.
+Once the MCP server is running, you can use it with any MCP-compatible client like Amazon Q.
 
 ### Available Tools
 
@@ -77,8 +100,21 @@ Once the MCP server is running, you can use it with any MCP-compatible client li
 ## Example
 
 ```
-Translate my presentation.pptx to Japanese using the Claude model
+Translate my presentation.pptx to Japanese using the Nova model
 ```
+
+## Command Line Arguments
+
+The server.py script supports the following command line arguments:
+
+- `--mcp`: Run in MCP mode
+- `--translate`: Translate a PowerPoint file
+- `--input-file`: Path to the input PowerPoint file
+- `--target-language`: Target language code
+- `--output-file`: Path to save the translated file
+- `--model-id`: Translation model ID (choices: 'amazon.nova-micro-v1:0', 'amazon.nova-lite-v1:0')
+- `--list-languages`: List supported languages
+- `--install-deps`: Install required dependencies
 
 ## Development
 
@@ -92,25 +128,12 @@ Translate my presentation.pptx to Japanese using the Claude model
 
 2. Install dependencies:
    ```bash
-   npm install
    pip install -r requirements.txt
    ```
 
 3. Run the server:
    ```bash
-   node index.js
-   ```
-
-### Publishing to npm
-
-1. Update version in package.json
-2. Login to npm:
-   ```bash
-   npm login
-   ```
-3. Publish:
-   ```bash
-   npm publish --access public
+   python server.py --mcp
    ```
 
 ## License
