@@ -6,7 +6,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@zhuermu/server-ppt-translator@latest"
+        "@zhu2mu/server-ppt-translator@latest"
       ],
       "env": {
         "AWS_ACCESS_KEY_ID": "${AWS_ACCESS_KEY_ID}",
