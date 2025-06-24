@@ -1,6 +1,6 @@
 {
   "name": "ppt-translator-mcp",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "MCP server for PowerPoint translation using AWS Bedrock",
   "main": "index.js",
   "bin": {
@@ -27,6 +27,5 @@
   },
   "homepage": "https://github.com/zhuermu/mcpppttranslator#readme",
   "dependencies": {
-    "@modelcontextprotocol/server": "^1.0.0"
   }
 }
