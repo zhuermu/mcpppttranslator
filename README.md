@@ -43,6 +43,23 @@ pip install -r requirements.txt
 python server.py --install-deps
 ```
 
+### Using uv (Fast Python Package Manager)
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/mcpppttranslator.git
+cd mcpppttranslator
+
+# Install dependencies with uv
+python server.py --install-deps --use-uv
+
+# Or create a virtual environment with uv
+python server.py --install-deps --use-uv --venv
+
+# Specify a custom virtual environment path
+python server.py --install-deps --use-uv --venv --venv-path /path/to/custom/venv
+```
+
 ### Using Amazon Q Configuration
 
 Add the following to your Amazon Q configuration:
@@ -115,6 +132,9 @@ The server.py script supports the following command line arguments:
 - `--model-id`: Translation model ID (choices: 'amazon.nova-micro-v1:0', 'amazon.nova-lite-v1:0')
 - `--list-languages`: List supported languages
 - `--install-deps`: Install required dependencies
+- `--use-uv`: Use uv package manager instead of pip
+- `--venv`: Create and use a virtual environment with uv
+- `--venv-path`: Path for the virtual environment (default: ./venv)
 
 ## Development
 

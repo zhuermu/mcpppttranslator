@@ -628,14 +628,43 @@ def main():
     parser.add_argument('--model-id', default=NOVA_MODEL_ID, choices=['amazon.nova-micro-v1:0', 'amazon.nova-lite-v1:0'], help='Translation model ID')
     parser.add_argument('--list-languages', action='store_true', help='List supported languages')
     parser.add_argument('--install-deps', action='store_true', help='Install required dependencies')
+    parser.add_argument('--use-uv', action='store_true', help='Use uv package manager instead of pip')
+    parser.add_argument('--venv', action='store_true', help='Create and use a virtual environment with uv')
+    parser.add_argument('--venv-path', help='Path for the virtual environment (default: ./venv)')
     
     args = parser.parse_args()
     
     if args.install_deps:
         try:
             import subprocess
-            logger.info("Installing required dependencies...")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "mcp-server", "python-pptx", "boto3", "python-dotenv"])
+            import shutil
+            
+            # Check if uv is available
+            use_uv = args.use_uv or shutil.which("uv") is not None
+            
+            logger.info(f"Installing required dependencies using {'uv' if use_uv else 'pip'}...")
+            
+            if use_uv:
+                # Use uv for installation
+                cmd = ["uv", "pip", "install", "mcp-server", "python-pptx", "boto3", "python-dotenv"]
+                if args.venv:
+                    # Create and use a virtual environment
+                    venv_path = args.venv_path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv")
+                    logger.info(f"Creating virtual environment at {venv_path}")
+                    subprocess.check_call(["uv", "venv", venv_path])
+                    
+                    # Determine the Python executable in the virtual environment
+                    if os.name == 'nt':  # Windows
+                        venv_python = os.path.join(venv_path, "Scripts", "python.exe")
+                    else:  # Unix/Linux/Mac
+                        venv_python = os.path.join(venv_path, "bin", "python")
+                    
+                    cmd = [venv_python, "-m", "uv", "pip", "install", "mcp-server", "python-pptx", "boto3", "python-dotenv"]
+            else:
+                # Use traditional pip
+                cmd = [sys.executable, "-m", "pip", "install", "mcp-server", "python-pptx", "boto3", "python-dotenv"]
+            
+            subprocess.check_call(cmd)
             logger.info("Dependencies installed successfully!")
             return
         except Exception as e:
