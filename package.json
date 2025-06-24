@@ -1,6 +1,6 @@
 {
-  "name": "ppt-translator-mcp-zhu2mu-unique",
-  "version": "1.0.0",
+  "name": "ppt-translator-mcp",
+  "version": "0.0.1",
   "description": "MCP server for PowerPoint translation using AWS Bedrock",
   "main": "index.js",
   "bin": {
