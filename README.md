@@ -8,7 +8,8 @@ A Model Context Protocol (MCP) service that provides PowerPoint translation capa
 - Preserve formatting during translation
 - Support for AWS Bedrock Nova models
 - Intelligent handling of proper nouns, brand names, and special content
-- Optimized MCP implementation with fallback support
+- Full MCP protocol compliance with proper initialization and tool handling
+- Fallback implementation when MCP library is not available
 
 ## Supported Languages
 
@@ -25,11 +26,11 @@ A Model Context Protocol (MCP) service that provides PowerPoint translation capa
 
 - Python 3.8+
 - AWS account with Bedrock access
-- AWS credentials configured
+- AWS credentials configured (via `aws configure` or environment variables)
 
 ## Installation
 
-### Using pip (Python)
+### Quick Setup
 
 ```bash
 # Clone the repository
@@ -37,92 +38,111 @@ git clone https://github.com/yourusername/mcpppttranslator.git
 cd mcpppttranslator
 
 # Install dependencies
-pip install -r requirements.txt
-
-# Or use the built-in helper
 python server.py --install-deps
+
+# Or use uv for faster installation
+python server.py --install-deps --use-uv
 ```
 
-### Using uv (Fast Python Package Manager)
+### Virtual Environment Setup (Recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/mcpppttranslator.git
-cd mcpppttranslator
-
-# Install dependencies with uv
-python server.py --install-deps --use-uv
-
-# Or create a virtual environment with uv
+# Create virtual environment with uv
 python server.py --install-deps --use-uv --venv
 
-# Specify a custom virtual environment path
+# Or specify custom path
 python server.py --install-deps --use-uv --venv --venv-path /path/to/custom/venv
 ```
 
-### Using Amazon Q Configuration
+## MCP Configuration
 
-Add the following to your Amazon Q configuration:
+### Option 1: AWS CLI Configuration (Recommended)
+
+First, configure your AWS credentials:
+```bash
+aws configure
+```
+
+Then add to your Amazon Q configuration:
 
 ```json
-"mcpServers": {
-  "ppt-translator": {
-    "timeout": 60,
-    "type": "stdio",
-    "command": "python",
-    "args": [
-      "/path/to/mcpppttranslator/server.py",
-      "--mcp"
-    ],
-    "env": {
-      "AWS_ACCESS_KEY_ID": "${AWS_ACCESS_KEY_ID}",
-      "AWS_SECRET_ACCESS_KEY": "${AWS_SECRET_ACCESS_KEY}",
-      "AWS_REGION": "us-east-1",
-      "DEFAULT_TARGET_LANGUAGE": "zh-CN"
+{
+  "mcpServers": {
+    "ppt-translator": {
+      "timeout": 300,
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "/path/to/mcpppttranslator/server.py",
+        "--mcp"
+      ],
+      "env": {
+        "AWS_REGION": "us-east-1",
+        "DEFAULT_TARGET_LANGUAGE": "zh-CN"
+      }
     }
   }
 }
 ```
 
-### Direct Python Execution
+### Option 2: Direct Credential Configuration
 
-You can also run the server directly using Python:
+```json
+{
+  "mcpServers": {
+    "ppt-translator": {
+      "timeout": 300,
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "/path/to/mcpppttranslator/server.py",
+        "--mcp"
+      ],
+      "env": {
+        "AWS_ACCESS_KEY_ID": "your-access-key",
+        "AWS_SECRET_ACCESS_KEY": "your-secret-key",
+        "AWS_REGION": "us-east-1",
+        "DEFAULT_TARGET_LANGUAGE": "zh-CN"
+      }
+    }
+  }
+}
+```
+
+## Usage
+
+### With Amazon Q
+
+Once configured, you can use natural language commands:
+
+```
+Translate my presentation.pptx to Japanese using the Nova model
+```
+
+### Command Line Usage
 
 ```bash
-# Run the server in MCP mode
+# Run in MCP mode
 python server.py --mcp
 
-# Or translate a file directly
+# Direct translation
 python server.py --translate --input-file presentation.pptx --target-language ja
 
 # List supported languages
 python server.py --list-languages
 ```
 
-## Usage
+## Available Tools
 
-Once the MCP server is running, you can use it with any MCP-compatible client like Amazon Q.
+1. **translate_ppt** - Translate a PowerPoint document
+   - `input_file`: Path to the input PowerPoint file (required)
+   - `target_language`: Target language code (default: zh-CN)
+   - `output_file`: Path to save the translated file (optional)
+   - `translation_method`: Translation method, 'nova' or 'claude' (default: nova)
 
-### Available Tools
-
-1. `translate_ppt` - Translate a PowerPoint document
-   - Parameters:
-     - `input_file`: Path to the input PowerPoint file (required)
-     - `target_language`: Target language code (default: zh-CN)
-     - `output_file`: Path to save the translated file (optional)
-     - `translation_method`: Translation method, 'nova' or 'claude' (default: nova)
-
-2. `list_supported_languages` - List all supported target languages
-
-## Example
-
-```
-Translate my presentation.pptx to Japanese using the Nova model
-```
+2. **list_supported_languages** - List all supported target languages
 
 ## Command Line Arguments
-
-The server.py script supports the following command line arguments:
 
 - `--mcp`: Run in MCP mode
 - `--translate`: Translate a PowerPoint file
@@ -136,25 +156,51 @@ The server.py script supports the following command line arguments:
 - `--venv`: Create and use a virtual environment with uv
 - `--venv-path`: Path for the virtual environment (default: ./venv)
 
+## Testing
+
+Test the MCP server functionality:
+
+```bash
+python test_mcp.py
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **AWS Credentials**: Ensure AWS credentials are properly configured via `aws configure` or environment variables.
+
+2. **Missing Dependencies**: Run `python server.py --install-deps` to install required packages.
+
+3. **MCP Protocol Errors**: The server implements full MCP protocol compliance. If you encounter initialization errors, ensure you're using a compatible MCP client.
+
+4. **File Permissions**: Ensure the server.py file has execute permissions: `chmod +x server.py`
+
 ## Development
 
 ### Local Development
 
-1. Clone this repository:
+1. Clone and setup:
    ```bash
    git clone https://github.com/yourusername/mcpppttranslator.git
    cd mcpppttranslator
+   python server.py --install-deps --use-uv --venv
    ```
 
-2. Install dependencies:
+2. Test the server:
    ```bash
-   pip install -r requirements.txt
+   python test_mcp.py
    ```
 
-3. Run the server:
-   ```bash
-   python server.py --mcp
-   ```
+### MCP Protocol Compliance
+
+This server implements the full MCP protocol specification including:
+
+- Proper `initialize` method handling
+- Standard `tools/list` and `tools/call` methods
+- Correct JSON-RPC 2.0 response formatting
+- Error handling and graceful degradation
+- Backward compatibility with legacy MCP methods
 
 ## License
 

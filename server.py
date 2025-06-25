@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Changed to DEBUG to see more details
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stderr)
@@ -27,23 +27,54 @@ logging.basicConfig(
 logger = logging.getLogger("ppt-translator-mcp")
 
 # Import required libraries with proper error handling
+def check_dependencies():
+    """Check if required dependencies are installed"""
+    missing_deps = []
+    
+    try:
+        from pptx import Presentation
+    except ImportError:
+        missing_deps.append("python-pptx")
+
+    try:
+        import boto3
+    except ImportError:
+        missing_deps.append("boto3")
+
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        missing_deps.append("python-dotenv")
+    
+    return missing_deps
+
+# Only check dependencies if not in MCP mode
+if "--mcp" not in sys.argv:
+    missing_deps = check_dependencies()
+    if missing_deps:
+        for dep in missing_deps:
+            logger.error(f"{dep} not found. Please install it with 'pip install {dep}'")
+        sys.exit(1)
+
+# Import dependencies (they should be available now)
+Presentation = None
+boto3 = None
+load_dotenv = None
+
 try:
     from pptx import Presentation
-except ImportError:
-    logger.error("python-pptx not found. Please install it with 'pip install python-pptx'")
-    sys.exit(1)
-
-try:
     import boto3
-except ImportError:
-    logger.error("boto3 not found. Please install it with 'pip install boto3'")
-    sys.exit(1)
-
-try:
     from dotenv import load_dotenv
-except ImportError:
-    logger.error("python-dotenv not found. Please install it with 'pip install python-dotenv'")
-    sys.exit(1)
+except ImportError as e:
+    # In MCP mode, we'll handle this gracefully
+    if "--mcp" in sys.argv:
+        logger.warning(f"Import warning: {e}")
+        # Create dummy functions for MCP mode
+        if load_dotenv is None:
+            def load_dotenv(): pass
+    else:
+        logger.error(f"Import error: {e}")
+        sys.exit(1)
 
 # Try to import fastmcp
 try:
@@ -53,7 +84,7 @@ try:
 except ImportError:
     USING_FASTMCP = False
     logger.warning("mcp.server not found. Using fallback MCP implementation.")
-    logger.warning("Consider installing fastmcp with 'pip install mcp-server'")
+    logger.warning("Consider installing mcp with 'pip install mcp'")
 
 # Load environment variables
 load_dotenv()
@@ -82,23 +113,51 @@ def init_bedrock_client() -> bool:
     """Initialize the AWS Bedrock client"""
     global bedrock_client
     try:
-        bedrock_client = boto3.client(
-            'bedrock-runtime',
-            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-            region_name=AWS_REGION
-        )
-        return True
+        region = os.getenv('AWS_REGION', AWS_REGION)
+        logger.info(f"Initializing Bedrock client with region: {region}")
+        
+        # Try using default credential chain first (works with AWS CLI, IAM roles, etc.)
+        try:
+            bedrock_client = boto3.client('bedrock-runtime', region_name=region)
+            logger.info("Successfully initialized Bedrock client using default credentials")
+            return True
+        except Exception as e:
+            logger.warning(f"Default credentials failed: {str(e)}")
+        
+        # Fallback to explicit credentials
+        access_key = os.getenv('AWS_ACCESS_KEY_ID')
+        secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+        
+        if access_key and secret_key and not access_key.startswith('${'):
+            bedrock_client = boto3.client(
+                'bedrock-runtime',
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name=region
+            )
+            logger.info("Successfully initialized Bedrock client using explicit credentials")
+            return True
+        else:
+            logger.error("AWS credentials not properly configured")
+            return False
+            
     except Exception as e:
         logger.error(f"Failed to initialize AWS Bedrock client: {str(e)}")
         return False
 
 
 def _translate_text(text: str, model_id: str, target_language: str) -> str:
-    """Translate using AWS Bedrock Nova Lite"""
+    """Translate using AWS Bedrock converse API"""
+    logger.info(f"Starting translation with model: {model_id}")
+    
+    # Always try to initialize the client if not available
     if not bedrock_client:
+        logger.info("Bedrock client not initialized, attempting to initialize...")
         if not init_bedrock_client():
+            logger.error("Failed to initialize Bedrock client")
             raise Exception("AWS Bedrock client not initialized")
+    else:
+        logger.info("Bedrock client already initialized")
     
     target_lang_name = LANGUAGE_MAP.get(target_language, target_language)
     
@@ -106,91 +165,79 @@ def _translate_text(text: str, model_id: str, target_language: str) -> str:
     if text.strip().isdigit() or (len(text.strip()) <= 3 and not any(c.isalpha() for c in text)):
         return text
     
-    body = json.dumps({
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "text": f"""Translate the following text to {target_lang_name}.
-                        
-Please follow these rules:
-1. Keep all brand names untranslated, such as Amazon, AWS, Bedrock, Nova, etc.
-2. Keep all person names untranslated
-3. Keep all company names untranslated
-4. Keep all product names untranslated
-5. Keep all currency amounts untranslated
-6. For content that shouldn't be translated, return the original text
-7. Only return the translation result, without any explanations or original text
-
-Original text: {text}"""
-                    }
-                ]
+    try:
+        logger.info(f"Calling Bedrock converse API with text: '{text[:50]}...'")
+        response = bedrock_client.converse(
+            modelId=model_id,
+            system=[
+                {
+                    "text": f"You are a professional translator. Translate text to {target_lang_name}. Keep the following untranslated: brand names (especially AWS, Amazon products), company names, person names, product names, time expressions, currency amounts, numbers. Return ONLY the translated text, no explanations or additional content."
+                }
+            ],
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": text
+                        }
+                    ]
+                }
+            ],
+            inferenceConfig={
+                "maxTokens": 1000,
+                "temperature": 0.1
             }
-        ],
-        "inferenceConfig": {
-            "max_new_tokens": 1000,
-            "temperature": 0.1
-        }
-    })
-    
-    response = bedrock_client.invoke_model(
-        body=body,
-        modelId=model_id,
-        accept="application/json",
-        contentType="application/json"
-    )
-    
-    response_body = json.loads(response.get('body').read())
-    translated_text = response_body['output']['message']['content'][0]['text'].strip()
-    
-    # If the translation result contains "important rules" or "don't translate", return the original text
-    if "重要规则" in translated_text or "不要翻译" in translated_text:
-        return text
+        )
         
-    return translated_text
+        translated_text = response['output']['message']['content'][0]['text'].strip()
+        return translated_text
+        
+    except Exception as e:
+        logger.error(f"Error during translation: {str(e)}")
+        return text
 
 def _update_text_frame_with_formatting(text_frame, new_text):
-    """Update text frame content while preserving original formatting"""
+    """更新文本框内容同时保持原有格式"""
     try:
         if not text_frame.paragraphs:
             return
         
-        # Save the format of the first paragraph
+        # 保存第一个段落的格式
         first_paragraph = text_frame.paragraphs[0]
         if first_paragraph.runs:
-            # Save the format of the first run
+            # 保存第一个 run 的格式
             first_run = first_paragraph.runs[0]
             font_name = first_run.font.name
             font_size = first_run.font.size
             font_bold = first_run.font.bold
             font_italic = first_run.font.italic
             
-            # Default to black
+            # 默认使用黑色
             from pptx.dml.color import RGBColor
-            font_color = RGBColor(0, 0, 0)  # Default black
+            font_color = RGBColor(0, 0, 0)  # 默认黑色
             
-            # Safely get the color
+            # 安全地获取颜色
             try:
                 if hasattr(first_run.font, 'color'):
                     if hasattr(first_run.font.color, 'rgb') and first_run.font.color.rgb:
                         font_color = first_run.font.color.rgb
                     elif hasattr(first_run.font.color, 'type'):
-                        # If it's a theme color, we still use default black
+                        # 如果是主题颜色，我们仍然使用默认黑色
                         pass
             except Exception as e:
-                logger.error(f"Error getting font color: {str(e)}")
+                logger.error(f"获取字体颜色时出错: {str(e)}")
             
-            # Clear all paragraphs
+            # 清空所有段落
             text_frame.clear()
             
-            # Add new text and apply original formatting
+            # 添加新文本并应用原有格式
             paragraph = text_frame.paragraphs[0]
-            # The correct method is to call add_run() directly on the paragraph, not on the runs collection
+            # 正确的方法是直接在段落上调用add_run()，而不是在runs集合上
             run = paragraph.add_run()
             run.text = new_text
             
-            # Restore formatting
+            # 恢复格式
             if font_name:
                 run.font.name = font_name
             if font_size:
@@ -200,14 +247,14 @@ def _update_text_frame_with_formatting(text_frame, new_text):
             if font_italic is not None:
                 run.font.italic = font_italic
             
-            # Set font color
+            # 设置字体颜色
             run.font.color.rgb = font_color
         else:
-            # If there are no runs, set the text directly
+            # 如果没有 runs，直接设置文本
             text_frame.text = new_text
     except Exception as e:
-        logger.error(f"Error updating text formatting: {str(e)}")
-        # If formatting fails, set the text directly
+        logger.error(f"更新文本格式时出错: {str(e)}")
+        # 如果格式化失败，直接设置文本
         text_frame.text = new_text
 
 def _translate_ppt(input_file: str, output_file: str, target_language: str, model_id: str) -> Dict[str, Any]:
@@ -216,6 +263,7 @@ def _translate_ppt(input_file: str, output_file: str, target_language: str, mode
         # Load the PPT
         prs = Presentation(input_file)
         translated_count = 0
+        total_shapes = 0
         
         # Iterate through all slides
         for slide_idx, slide in enumerate(prs.slides):
@@ -223,25 +271,63 @@ def _translate_ppt(input_file: str, output_file: str, target_language: str, mode
             
             # Iterate through all shapes in the slide
             for shape in slide.shapes:
+                total_shapes += 1
                 try:
-                    if hasattr(shape, "text") and shape.text.strip():
+                    # Check if shape has text
+                    if hasattr(shape, "text"):
                         original_text = shape.text.strip()
+                        logger.info(f"Found text in shape: '{original_text[:100]}...'")
                         
-                        # Translate the text
-                        translated_text = _translate_text(original_text, model_id, target_language)
-                        
-                        if translated_text and translated_text != original_text:
-                            # Update the text while preserving formatting
-                            if hasattr(shape, 'text_frame') and shape.text_frame:
-                                _update_text_frame_with_formatting(shape.text_frame, translated_text)
-                            else:
-                                shape.text = translated_text
+                        if original_text:
+                            # Log original formatting info for debugging
+                            if hasattr(shape, 'text_frame') and shape.text_frame and shape.text_frame.paragraphs:
+                                for para_idx, paragraph in enumerate(shape.text_frame.paragraphs):
+                                    for run_idx, run in enumerate(paragraph.runs):
+                                        if run.text.strip():
+                                            logger.debug(f"Original format - Para {para_idx}, Run {run_idx}: "
+                                                       f"Font: {run.font.name}, Size: {run.font.size}, "
+                                                       f"Bold: {run.font.bold}, Italic: {run.font.italic}")
+                                            break
+                                    if any(run.text.strip() for run in paragraph.runs):
+                                        break
                             
-                            translated_count += 1
-                            logger.info(f"Translated: '{original_text[:50]}...' -> '{translated_text[:50]}...'")
+                            # Translate the text
+                            translated_text = _translate_text(original_text, model_id, target_language)
+                            logger.info(f"Translation result: '{translated_text[:100]}...'")
+                            
+                            if translated_text and translated_text != original_text:
+                                # Update the text while preserving formatting
+                                if hasattr(shape, 'text_frame') and shape.text_frame:
+                                    _update_text_frame_with_formatting(shape.text_frame, translated_text)
+                                else:
+                                    shape.text = translated_text
+                                
+                                # Log new formatting info for verification
+                                if hasattr(shape, 'text_frame') and shape.text_frame and shape.text_frame.paragraphs:
+                                    for para_idx, paragraph in enumerate(shape.text_frame.paragraphs):
+                                        for run_idx, run in enumerate(paragraph.runs):
+                                            if run.text.strip():
+                                                logger.debug(f"New format - Para {para_idx}, Run {run_idx}: "
+                                                           f"Font: {run.font.name}, Size: {run.font.size}, "
+                                                           f"Bold: {run.font.bold}, Italic: {run.font.italic}")
+                                                break
+                                        if any(run.text.strip() for run in paragraph.runs):
+                                            break
+                                
+                                translated_count += 1
+                                logger.info(f"Successfully translated: '{original_text[:50]}...' -> '{translated_text[:50]}...'")
+                            else:
+                                logger.info(f"No translation needed or same text: '{original_text[:50]}...'")
+                        else:
+                            logger.info("Shape has empty text")
+                    else:
+                        logger.info("Shape has no text attribute")
                 except Exception as e:
                     logger.error(f"Error processing shape: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     continue
+        
+        logger.info(f"Processed {total_shapes} shapes total")
         
         # Save the translated PPT
         prs.save(output_file)
@@ -250,6 +336,7 @@ def _translate_ppt(input_file: str, output_file: str, target_language: str, mode
         return {"translated_count": translated_count}
     except Exception as e:
         logger.error(f"Error translating PPT: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise
 
 # Create MCP server
@@ -264,59 +351,64 @@ if USING_FASTMCP:
     @parameter("input_file", description="Path to the input PowerPoint file", required=True)
     @parameter("target_language", description="Target language code (e.g., zh-CN, en, ja, ko, fr, de, es)", default=default_target_language)
     @parameter("output_file", description="Path to save the translated PowerPoint file (if not provided, will be auto-generated)")
-    @parameter("translation_method", description="Translation method to use: 'nova' (faster) or 'claude' (higher quality)", 
-               default="nova", enum=["nova", "claude"])
+    @parameter("model_id", description="AWS Bedrock model ID to use for translation", 
+               default=NOVA_MODEL_ID, enum=["amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0", "anthropic.claude-3-5-sonnet-20241022-v2:0", "anthropic.claude-3-5-haiku-20241022-v1:0", "anthropic.claude-3-opus-20240229-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "anthropic.claude-3-haiku-20240307-v1:0"])
     def translate_ppt(
         input_file: str,
         target_language: str = default_target_language,
         output_file: str = None,
-        translation_method: str = "nova"
+        model_id: str = NOVA_MODEL_ID
     ) -> Dict[str, Any]:
         """Translate a PowerPoint document to the specified language"""
         try:
             if not input_file:
-                return {"error": "No input file path provided"}
+                return {
+                    "content": [{"type": "text", "text": "Error: No input file path provided"}],
+                    "isError": True
+                }
             
             if not Path(input_file).exists():
-                return {"error": f"File does not exist: {input_file}"}
+                return {
+                    "content": [{"type": "text", "text": f"Error: File does not exist: {input_file}"}],
+                    "isError": True
+                }
             
             # Generate output filename
             if not output_file:
                 input_path = Path(input_file)
                 output_file = str(input_path.parent / f"{input_path.stem}_translated_{target_language}{input_path.suffix}")
             
-            # Select model based on translation method
-            model_id = NOVA_MODEL_ID if translation_method == "nova" else CLAUDE_MODEL_ID
-            
             # Execute translation
             result = _translate_ppt(input_file, output_file, target_language, model_id)
             
+            success_message = f"""PowerPoint translation completed successfully!
+
+Input file: {input_file}
+Output file: {output_file}
+Target language: {target_language} ({LANGUAGE_MAP.get(target_language, target_language)})
+Model ID: {model_id}
+Translated texts count: {result.get('translated_count', 0)}"""
+            
             return {
-                "success": True,
-                "input_file": input_file,
-                "output_file": output_file,
-                "target_language": target_language,
-                "translation_method": translation_method,
-                "translated_texts_count": result.get('translated_count', 0),
-                "message": "PowerPoint translation completed"
+                "content": [{"type": "text", "text": success_message}]
             }
             
         except Exception as e:
             logger.error(f"Error processing request: {str(e)}")
-            return {"error": f"Processing failed: {str(e)}"}
+            return {
+                "content": [{"type": "text", "text": f"Error: Processing failed: {str(e)}"}],
+                "isError": True
+            }
 
     @mcp.tool()
-    def list_supported_languages() -> Dict[str, str]:
+    def list_supported_languages() -> Dict[str, Any]:
         """List all supported target languages for translation"""
+        languages_text = "Supported target languages:\n\n"
+        for code, name in LANGUAGE_MAP.items():
+            languages_text += f"• {code}: {name}\n"
+        
         return {
-            "zh-CN": "Simplified Chinese",
-            "zh-TW": "Traditional Chinese",
-            "en": "English",
-            "ja": "Japanese",
-            "ko": "Korean",
-            "fr": "French",
-            "de": "German",
-            "es": "Spanish"
+            "content": [{"type": "text", "text": languages_text}]
         }
 
 else:
@@ -355,28 +447,41 @@ else:
             sys.stdout.write(json.dumps(response) + "\n")
             sys.stdout.flush()
         
-        def handle_describe(self, req_id: Any) -> None:
-            """Handle mcp.describe method"""
+
+        
+        def handle_initialize(self, params: Dict[str, Any], req_id: Any) -> None:
+            """Handle initialize method"""
+            response = self.create_success_response({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": self.name,
+                    "version": self.version
+                }
+            }, req_id)
+            self.send_response(response)
+
+        def handle_tools_list(self, req_id: Any) -> None:
+            """Handle tools/list method"""
             tool_schemas = []
             for tool_name, tool_info in self.tools.items():
                 tool_schemas.append({
                     "name": tool_name,
                     "description": tool_info.get("description", ""),
-                    "parameters": tool_info.get("parameters", {})
+                    "inputSchema": tool_info.get("parameters", {})
                 })
                 
             response = self.create_success_response({
-                "name": self.name,
-                "version": self.version,
-                "description": self.description,
                 "tools": tool_schemas
             }, req_id)
             self.send_response(response)
-        
-        def handle_invoke(self, params: Dict[str, Any], req_id: Any) -> None:
-            """Handle mcp.invoke method"""
+
+        def handle_tools_call(self, params: Dict[str, Any], req_id: Any) -> None:
+            """Handle tools/call method"""
             tool_name = params.get("name")
-            tool_params = params.get("parameters", {})
+            tool_arguments = params.get("arguments", {})
             
             if tool_name not in self.tools:
                 response = self.create_error_response(
@@ -389,19 +494,28 @@ else:
             
             try:
                 tool_info = self.tools[tool_name]
-                result = tool_info["function"](**tool_params)
-                response = self.create_success_response(result, req_id)
+                result = tool_info["function"](**tool_arguments)
+                
+                # Format result as MCP tool response
+                if isinstance(result, dict) and "content" in result:
+                    content = result["content"]
+                else:
+                    content = [{"type": "text", "text": str(result)}]
+                
+                response = self.create_success_response({
+                    "content": content,
+                    "isError": False
+                }, req_id)
                 self.send_response(response)
             except Exception as e:
-                logger.error(f"Error invoking tool {tool_name}: {str(e)}")
+                logger.error(f"Error calling tool {tool_name}: {str(e)}")
                 logger.error(traceback.format_exc())
-                response = self.create_error_response(
-                    -32603,  # Internal error
-                    f"Error invoking tool {tool_name}: {str(e)}",
-                    req_id
-                )
+                response = self.create_success_response({
+                    "content": [{"type": "text", "text": f"Error calling tool {tool_name}: {str(e)}"}],
+                    "isError": True
+                }, req_id)
                 self.send_response(response)
-        
+
         def handle_request(self, request_line: str) -> bool:
             """Handle a single MCP request
             
@@ -437,10 +551,22 @@ else:
             req_id = request.get("id")
             
             try:
-                if method == "mcp.describe":
-                    self.handle_describe(req_id)
+                if method == "initialize":
+                    self.handle_initialize(params, req_id)
+                elif method == "tools/list":
+                    self.handle_tools_list(req_id)
+                elif method == "tools/call":
+                    self.handle_tools_call(params, req_id)
+                # Legacy methods for backward compatibility
+                elif method == "mcp.describe":
+                    self.handle_tools_list(req_id)
                 elif method == "mcp.invoke":
-                    self.handle_invoke(params, req_id)
+                    # Convert old format to new format
+                    new_params = {
+                        "name": params.get("name"),
+                        "arguments": params.get("parameters", {})
+                    }
+                    self.handle_tools_call(new_params, req_id)
                 else:
                     response = self.create_error_response(
                         -32601,  # Method not found
@@ -520,59 +646,64 @@ else:
     @parameter("input_file", description="Path to the input PowerPoint file", required=True)
     @parameter("target_language", description="Target language code (e.g., zh-CN, en, ja, ko, fr, de, es)", default=default_target_language)
     @parameter("output_file", description="Path to save the translated PowerPoint file (if not provided, will be auto-generated)")
-    @parameter("translation_method", description="Translation method to use: 'nova' (faster) or 'claude' (higher quality)", 
-               default="nova", enum=["nova", "claude"])
+    @parameter("model_id", description="AWS Bedrock model ID to use for translation", 
+               default=NOVA_MODEL_ID, enum=["amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0", "anthropic.claude-3-5-sonnet-20241022-v2:0", "anthropic.claude-3-5-haiku-20241022-v1:0", "anthropic.claude-3-opus-20240229-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "anthropic.claude-3-haiku-20240307-v1:0"])
     def translate_ppt(
         input_file: str,
         target_language: str = default_target_language,
         output_file: str = None,
-        translation_method: str = "nova"
+        model_id: str = NOVA_MODEL_ID
     ) -> Dict[str, Any]:
         """Translate a PowerPoint document to the specified language"""
         try:
             if not input_file:
-                return {"error": "No input file path provided"}
+                return {
+                    "content": [{"type": "text", "text": "Error: No input file path provided"}],
+                    "isError": True
+                }
             
             if not Path(input_file).exists():
-                return {"error": f"File does not exist: {input_file}"}
+                return {
+                    "content": [{"type": "text", "text": f"Error: File does not exist: {input_file}"}],
+                    "isError": True
+                }
             
             # Generate output filename
             if not output_file:
                 input_path = Path(input_file)
                 output_file = str(input_path.parent / f"{input_path.stem}_translated_{target_language}{input_path.suffix}")
             
-            # Select model based on translation method
-            model_id = NOVA_MODEL_ID if translation_method == "nova" else CLAUDE_MODEL_ID
-            
             # Execute translation
             result = _translate_ppt(input_file, output_file, target_language, model_id)
             
+            success_message = f"""PowerPoint translation completed successfully!
+
+Input file: {input_file}
+Output file: {output_file}
+Target language: {target_language} ({LANGUAGE_MAP.get(target_language, target_language)})
+Model ID: {model_id}
+Translated texts count: {result.get('translated_count', 0)}"""
+            
             return {
-                "success": True,
-                "input_file": input_file,
-                "output_file": output_file,
-                "target_language": target_language,
-                "translation_method": translation_method,
-                "translated_texts_count": result.get('translated_count', 0),
-                "message": "PowerPoint translation completed"
+                "content": [{"type": "text", "text": success_message}]
             }
             
         except Exception as e:
             logger.error(f"Error processing request: {str(e)}")
-            return {"error": f"Processing failed: {str(e)}"}
+            return {
+                "content": [{"type": "text", "text": f"Error: Processing failed: {str(e)}"}],
+                "isError": True
+            }
 
     @tool()
-    def list_supported_languages() -> Dict[str, str]:
+    def list_supported_languages() -> Dict[str, Any]:
         """List all supported target languages for translation"""
+        languages_text = "Supported target languages:\n\n"
+        for code, name in LANGUAGE_MAP.items():
+            languages_text += f"• {code}: {name}\n"
+        
         return {
-            "zh-CN": "Simplified Chinese",
-            "zh-TW": "Traditional Chinese",
-            "en": "English",
-            "ja": "Japanese",
-            "ko": "Korean",
-            "fr": "French",
-            "de": "German",
-            "es": "Spanish"
+            "content": [{"type": "text", "text": languages_text}]
         }
 
     # Register tools for fallback implementation
@@ -597,11 +728,11 @@ else:
                             "type": "string",
                             "description": "Path to save the translated PowerPoint file (if not provided, will be auto-generated)"
                         },
-                        "translation_method": {
+                        "model_id": {
                             "type": "string",
-                            "description": "Translation method to use: 'nova' (faster) or 'claude' (higher quality)",
-                            "default": "nova",
-                            "enum": ["nova", "claude"]
+                            "description": "AWS Bedrock model ID to use for translation",
+                            "default": NOVA_MODEL_ID,
+                            "enum": ["amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0", "anthropic.claude-3-5-sonnet-20241022-v2:0", "anthropic.claude-3-5-haiku-20241022-v1:0", "anthropic.claude-3-opus-20240229-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "anthropic.claude-3-haiku-20240307-v1:0"]
                         }
                     },
                     "required": ["input_file"]
@@ -625,7 +756,7 @@ def main():
     parser.add_argument('--input-file', help='Path to the input PowerPoint file')
     parser.add_argument('--target-language', default=default_target_language, help='Target language code')
     parser.add_argument('--output-file', help='Path to save the translated file')
-    parser.add_argument('--model-id', default=NOVA_MODEL_ID, choices=['amazon.nova-micro-v1:0', 'amazon.nova-lite-v1:0'], help='Translation model ID')
+    parser.add_argument('--model-id', default=NOVA_MODEL_ID, choices=['amazon.nova-micro-v1:0', 'amazon.nova-lite-v1:0', 'amazon.nova-pro-v1:0', 'anthropic.claude-3-5-sonnet-20241022-v2:0', 'anthropic.claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-opus-20240229-v1:0', 'anthropic.claude-3-sonnet-20240229-v1:0', 'anthropic.claude-3-haiku-20240307-v1:0'], help='Translation model ID')
     parser.add_argument('--list-languages', action='store_true', help='List supported languages')
     parser.add_argument('--install-deps', action='store_true', help='Install required dependencies')
     parser.add_argument('--use-uv', action='store_true', help='Use uv package manager instead of pip')
@@ -646,7 +777,7 @@ def main():
             
             if use_uv:
                 # Use uv for installation
-                cmd = ["uv", "pip", "install", "mcp-server", "python-pptx", "boto3", "python-dotenv"]
+                cmd = ["uv", "pip", "install", "mcp", "python-pptx", "boto3", "python-dotenv"]
                 if args.venv:
                     # Create and use a virtual environment
                     venv_path = args.venv_path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv")
@@ -659,10 +790,10 @@ def main():
                     else:  # Unix/Linux/Mac
                         venv_python = os.path.join(venv_path, "bin", "python")
                     
-                    cmd = [venv_python, "-m", "uv", "pip", "install", "mcp-server", "python-pptx", "boto3", "python-dotenv"]
+                    cmd = [venv_python, "-m", "uv", "pip", "install", "mcp", "python-pptx", "boto3", "python-dotenv"]
             else:
                 # Use traditional pip
-                cmd = [sys.executable, "-m", "pip", "install", "mcp-server", "python-pptx", "boto3", "python-dotenv"]
+                cmd = [sys.executable, "-m", "pip", "install", "mcp", "python-pptx", "boto3", "python-dotenv"]
             
             subprocess.check_call(cmd)
             logger.info("Dependencies installed successfully!")
@@ -704,7 +835,7 @@ def main():
             print(f"Input file: {args.input_file}")
             print(f"Output file: {output_file}")
             print(f"Target language: {args.target_language}")
-            print(f"Translation method: {args.method}")
+            print(f"Model ID: {args.model_id}")
             print(f"Translated {result.get('translated_count', 0)} text elements")
         except Exception as e:
             logger.error(f"Error during translation: {str(e)}")
