@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed to DEBUG to see more details
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stderr)
@@ -279,18 +279,6 @@ def _translate_ppt(input_file: str, output_file: str, target_language: str, mode
                         logger.info(f"Found text in shape: '{original_text[:100]}...'")
                         
                         if original_text:
-                            # Log original formatting info for debugging
-                            if hasattr(shape, 'text_frame') and shape.text_frame and shape.text_frame.paragraphs:
-                                for para_idx, paragraph in enumerate(shape.text_frame.paragraphs):
-                                    for run_idx, run in enumerate(paragraph.runs):
-                                        if run.text.strip():
-                                            logger.debug(f"Original format - Para {para_idx}, Run {run_idx}: "
-                                                       f"Font: {run.font.name}, Size: {run.font.size}, "
-                                                       f"Bold: {run.font.bold}, Italic: {run.font.italic}")
-                                            break
-                                    if any(run.text.strip() for run in paragraph.runs):
-                                        break
-                            
                             # Translate the text
                             translated_text = _translate_text(original_text, model_id, target_language)
                             logger.info(f"Translation result: '{translated_text[:100]}...'")
@@ -301,18 +289,6 @@ def _translate_ppt(input_file: str, output_file: str, target_language: str, mode
                                     _update_text_frame_with_formatting(shape.text_frame, translated_text)
                                 else:
                                     shape.text = translated_text
-                                
-                                # Log new formatting info for verification
-                                if hasattr(shape, 'text_frame') and shape.text_frame and shape.text_frame.paragraphs:
-                                    for para_idx, paragraph in enumerate(shape.text_frame.paragraphs):
-                                        for run_idx, run in enumerate(paragraph.runs):
-                                            if run.text.strip():
-                                                logger.debug(f"New format - Para {para_idx}, Run {run_idx}: "
-                                                           f"Font: {run.font.name}, Size: {run.font.size}, "
-                                                           f"Bold: {run.font.bold}, Italic: {run.font.italic}")
-                                                break
-                                        if any(run.text.strip() for run in paragraph.runs):
-                                            break
                                 
                                 translated_count += 1
                                 logger.info(f"Successfully translated: '{original_text[:50]}...' -> '{translated_text[:50]}...'")
