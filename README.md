@@ -30,28 +30,46 @@ A Model Context Protocol (MCP) service that provides PowerPoint translation capa
 
 ## Installation
 
-### Quick Setup
+### Virtual Environment Setup (Recommended)
 
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/mcpppttranslator.git
 cd mcpppttranslator
 
-# Install dependencies
-python server.py --install-deps
+# Create virtual environment
+python3 -m venv venv
 
-# Or use uv for faster installation
-python server.py --install-deps --use-uv
+# Activate virtual environment
+source venv/bin/activate  # On macOS/Linux
+# or
+venv\Scripts\activate     # On Windows
+
+# Install all dependencies with exact versions
+pip install -r requirements.txt
+
+# Verify installation
+python3 server.py --list-languages
 ```
 
-### Virtual Environment Setup (Recommended)
+### Alternative Setup with Project Script
 
 ```bash
-# Create virtual environment with uv
-python server.py --install-deps --use-uv --venv
+# Note: The project script may have issues with dependency detection
+# Use the standard method above for reliable installation
+
+# If you have uv installed globally, you can try:
+python3 server.py --install-deps --use-uv --venv
 
 # Or specify custom path
-python server.py --install-deps --use-uv --venv --venv-path /path/to/custom/venv
+python3 server.py --install-deps --use-uv --venv --venv-path /path/to/custom/venv
+```
+
+### Direct Installation (Not Recommended)
+
+```bash
+# Install dependencies globally (not recommended)
+pip install -r requirements.txt
 ```
 
 ## MCP Configuration
